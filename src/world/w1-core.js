@@ -230,6 +230,62 @@ class RBXWorld {
         return g;
     }
 
+    setHeadMesh(buf) {
+        const dv = new DataView(buf);
+        let i = 0;
+        while (i < 32 && dv.getUint8(i) !== 10) i++;
+        i++;
+        const hs = dv.getUint16(i, true), vs = dv.getUint8(i + 2), nv = dv.getUint32(i + 4, true), nf = dv.getUint32(i + 8, true);
+        const o = i + hs;
+        const verts = new Float32Array(nv * 8);
+        for (let k = 0; k < nv; k++) for (let j = 0; j < 8; j++) verts[k * 8 + j] = dv.getFloat32(o + k * vs + j * 4, true);
+        const fo = o + nv * vs;
+        const idx = new Uint32Array(nf * 3);
+        for (let k = 0; k < nf * 3; k++) idx[k] = dv.getUint32(fo + k * 4, true);
+        let dot = 0;
+        for (let k = 0; k < nf; k++) {
+            const a = idx[k * 3] * 8, b = idx[k * 3 + 1] * 8, c = idx[k * 3 + 2] * 8;
+            const e1 = [verts[b] - verts[a], verts[b + 1] - verts[a + 1], verts[b + 2] - verts[a + 2]];
+            const e2 = [verts[c] - verts[a], verts[c + 1] - verts[a + 1], verts[c + 2] - verts[a + 2]];
+            const cr = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+            dot += cr[0] * verts[a + 3] + cr[1] * verts[a + 4] + cr[2] * verts[a + 5];
+        }
+        if (dot < 0) for (let k = 0; k < nf; k++) { const t = idx[k * 3 + 1]; idx[k * 3 + 1] = idx[k * 3 + 2]; idx[k * 3 + 2] = t; }
+        this.headData = { verts, idx, nv, nf };
+    }
+
+    headScaleOf(part) {
+        const info = this.partKind(part);
+        const s = part.props.Size, sc = info.scale || { x: 1, y: 1, z: 1 };
+        return Math.min(s.x * sc.x, s.z * sc.z) / 1.25;
+    }
+
+    headGeometry(sx, sy, sz) {
+        const THREE = this.THREE;
+        const key = 'head|' + sx + '|' + sy + '|' + sz;
+        let g = this.geomCache.get(key);
+        if (g) return g;
+        const d = this.headData;
+        const sXZ = Math.min(sx, sz) / 1.25, sY = sy / 1.25;
+        const ext = 0.625 * (sY - sXZ);
+        const pos = new Float32Array(d.nv * 3), nor = new Float32Array(d.nv * 3), uv = new Float32Array(d.nv * 2);
+        for (let k = 0; k < d.nv; k++) {
+            const v = d.verts, o = k * 8;
+            pos[k * 3] = v[o] * sXZ;
+            pos[k * 3 + 1] = v[o + 1] > 0 ? v[o + 1] * sXZ + ext : v[o + 1] * sXZ - ext;
+            pos[k * 3 + 2] = v[o + 2] * sXZ;
+            nor[k * 3] = v[o + 3]; nor[k * 3 + 1] = v[o + 4]; nor[k * 3 + 2] = v[o + 5];
+            uv[k * 2] = v[o + 6]; uv[k * 2 + 1] = 1 - v[o + 7];
+        }
+        g = new THREE.BufferGeometry();
+        g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+        g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+        g.setIndex(new THREE.BufferAttribute(d.idx, 1));
+        this.geomCache.set(key, g);
+        return g;
+    }
+
     sphereGeometry() {
         const THREE = this.THREE;
         let g = this.geomCache.get('sphere');
@@ -304,7 +360,8 @@ class RBXWorld {
             case 'box': geom = this.boxGeometry(sx, sy, sz2); break;
             case 'wedge': geom = this.hullGeometry('wedge', sx, sy, sz2); break;
             case 'cornerwedge': geom = this.hullGeometry('cornerwedge', sx, sy, sz2); break;
-            case 'ball': case 'head': geom = this.sphereGeometry(); scaleVec = [sx, sy, sz2]; kind = 'other'; break;
+            case 'head': if (this.headData) { geom = this.headGeometry(sx, sy, sz2); kind = 'other'; break; }
+            case 'ball': geom = this.sphereGeometry(); scaleVec = [sx, sy, sz2]; kind = 'other'; break;
             case 'cylX': geom = this.cylinderGeometry('x'); scaleVec = [sx, sy, sz2]; kind = 'other'; break;
             case 'cylY': geom = this.cylinderGeometry('y'); scaleVec = [sx, sy, sz2]; kind = 'other'; break;
             default: geom = this.boxGeometry(sx, sy, sz2);
@@ -384,7 +441,8 @@ class RBXWorld {
                 { w: sz.x, h: sz.z, pos: [0, -sz.y / 2 - 0.01, 0], rot: [Math.PI / 2, 0, 0] },
                 { w: sz.x, h: sz.y, pos: [0, 0, -sz.z / 2 - 0.01], rot: [0, Math.PI, 0] }
             ];
-            const pl = planes[f];
+            let pl = planes[f];
+            if (this.headData && f === 5 && this.partKind(part).kind === 'head') { const hs = this.headScaleOf(part); pl = { w: 1.2 * hs, h: 1.2 * hs, pos: [0, 0, -(0.6 * hs + 0.01)], rot: [0, Math.PI, 0] }; }
             if (!pl) continue;
             if (tile) {
                 tex.wrapS = tex.wrapT = THREE.RepeatWrapping;

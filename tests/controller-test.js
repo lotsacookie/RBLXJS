@@ -1,0 +1,22 @@
+const R = require('../rbx-runtime.js');
+globalThis.RBXRuntime = R;
+const { RBXController } = require('../rbx-controller.js');
+const logs = [];
+const game = new R.Game({ out: (k, t) => logs.push(k + ': ' + t), onError: (m) => logs.push('ERR ' + m) });
+game.loadBaseplate();
+game.start();
+const c = new RBXController(game);
+const step = () => { c.update(1 / 60); game.update(1 / 60); };
+for (let i = 0; i < 120; i++) step();
+console.log('idle', c.px.toFixed(2), c.py.toFixed(2), c.pz.toFixed(2), c.onGround);
+const y0 = c.py, z0 = c.pz;
+c.keys.add('KeyW');
+for (let i = 0; i < 120; i++) step();
+console.log('walk dz', (c.pz - z0).toFixed(2), 'dy', (c.py - y0).toFixed(3), c.onGround);
+c.keys.add('Space');
+let maxY = c.py;
+for (let i = 0; i < 40; i++) { step(); maxY = Math.max(maxY, c.py); }
+console.log('jump peak', (maxY - y0).toFixed(2));
+const ra = game.character().findChild('Right Arm').props.CFrame.m;
+console.log('arm', ra[0].toFixed(2), ra[1].toFixed(2), ra[2].toFixed(2));
+console.log(logs.join('\n'));

@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RBLXJS Launcher</title>
+<style>
+@font-face { font-family: "Source Sans Pro"; font-weight: 400; src: url(assets/fonts/SourceSansPro-Regular.ttf) format("truetype"); }
+@font-face { font-family: "Source Sans Pro"; font-weight: 700; src: url(assets/fonts/SourceSansPro-Bold.ttf) format("truetype"); }
+:root { --bg: #1f1f1f; --panel: #2b2b2b; --line: #444; --text: #f2f2f2; --dim: #a0a0a0; --blue: #5a8ee9; }
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); font-family: "Source Sans Pro", "Segoe UI", Arial, sans-serif; }
+main { max-width: 640px; margin: 0 auto; padding: 32px 16px 48px; }
+header { display: flex; align-items: center; gap: 14px; margin-bottom: 24px; }
+header img { height: 34px; }
+h1 { font-size: 26px; margin: 0; }
+#drop { border: 2px dashed var(--line); border-radius: 6px; background: var(--panel); padding: 40px 16px; text-align: center; cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+#drop.over { border-color: var(--blue); background: #323a48; }
+#drop strong { display: block; font-size: 20px; margin-bottom: 6px; }
+#drop span { color: var(--dim); }
+#file { display: none; }
+#info { margin-top: 16px; padding: 14px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; display: none; }
+#info dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 8px 0 0; }
+#info dt { color: var(--dim); }
+#info dd { margin: 0; }
+#err { color: #ff6b5e; margin-top: 12px; min-height: 20px; }
+.row { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+button { font: 700 18px "Source Sans Pro", "Segoe UI", Arial, sans-serif; color: #fff; border: 0; border-radius: 4px; padding: 12px 22px; cursor: pointer; background: #555; }
+button.primary { background: var(--blue); }
+button:disabled { opacity: 0.45; cursor: default; }
+label { display: block; margin-top: 18px; color: var(--dim); }
+input[type=text] { width: 100%; margin-top: 6px; padding: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; color: var(--text); font: 16px "Source Sans Pro", "Segoe UI", Arial, sans-serif; }
+</style>
+</head>
+<body>
+<main>
+<header><img src="assets/textures/roblox-logo.png" alt=""><h1>RBLXJS Launcher</h1></header>
+<div id="drop" tabindex="0"><strong>Drop an .rbxl / .rbxlx place here</strong><span>or click to choose a file</span></div>
+<input id="file" type="file" accept=".rbxl,.rbxlx,.rbxm,.rbxmx">
+<div id="info"><strong id="pname"></strong><dl id="stats"></dl></div>
+<div id="err"></div>
+<div class="row"><button id="play" class="primary" disabled>Play</button><button id="base">Play Baseplate</button></div>
+<label>Player name<input id="name" type="text" value="Player1" maxlength="20"></label>
+</main>
+<script src="rbx-parser.js"></script>
+<script>
+(function () {
+    var drop = document.getElementById('drop');
+    var fileInput = document.getElementById('file');
+    var info = document.getElementById('info');
+    var err = document.getElementById('err');
+    var play = document.getElementById('play');
+    var current = null;
+
+    function openDb() {
+        return new Promise(function (res, rej) {
+            var r = indexedDB.open('rbxjs', 1);
+            r.onupgradeneeded = function () { r.result.createObjectStore('places'); };
+            r.onsuccess = function () { res(r.result); };
+            r.onerror = function () { rej(r.error); };
+        });
+    }
+
+    function save(rec) {
+        return openDb().then(function (db) {
+            return new Promise(function (res, rej) {
+                var tx = db.transaction('places', 'readwrite');
+                if (rec) tx.objectStore('places').put(rec, 'current'); else tx.objectStore('places').delete('current');
+                tx.oncomplete = res;
+                tx.onerror = function () { rej(tx.error); };
+            });
+        });
+    }
+
+    function count(roots) {
+        var c = { total: 0, parts: 0, scripts: 0, guis: 0, models: 0 };
+        function walk(n) {
+            c.total++;
+            var cn = n.className;
+            if (/Part$|^Part$|MeshPart|UnionOperation|^Seat$|SpawnLocation/.test(cn)) c.parts++;
+            else if (cn === 'Script' || cn === 'LocalScript' || cn === 'ModuleScript') c.scripts++;
+            else if (/Gui$/.test(cn)) c.guis++;
+            else if (cn === 'Model') c.models++;
+            for (var i = 0; i < n.children.length; i++) walk(n.children[i]);
+        }
+        for (var i = 0; i < roots.length; i++) walk(roots[i]);
+        return c;
+    }
+
+    function row(k, v) {
+        var dt = document.createElement('dt'); dt.textContent = k;
+        var dd = document.createElement('dd'); dd.textContent = v;
+        return [dt, dd];
+    }
+
+    async function load(file) {
+        err.textContent = '';
+        info.style.display = 'none';
+        play.disabled = true;
+        current = null;
+        try {
+            var buf = await file.arrayBuffer();
+            var parsed = RBXParser.parseAsync ? await RBXParser.parseAsync(buf) : RBXParser.parse(buf);
+            if (!parsed || !parsed.roots || !parsed.roots.length) throw new Error('No instances found in this file');
+            var c = count(parsed.roots);
+            document.getElementById('pname').textContent = file.name;
+            var stats = document.getElementById('stats');
+            stats.textContent = '';
+            [['Size', (file.size / 1048576).toFixed(2) + ' MB'], ['Instances', c.total], ['Parts', c.parts], ['Scripts', c.scripts], ['GUIs', c.guis], ['Models', c.models]].forEach(function (p) {
+                row(p[0], p[1]).forEach(function (e) { stats.appendChild(e); });
+            });
+            info.style.display = 'block';
+            current = { name: file.name, data: buf };
+            play.disabled = false;
+        } catch (e) {
+            err.textContent = 'Could not read place: ' + (e && e.message ? e.message : e);
+        }
+    }
+
+    function go(query) {
+        var name = document.getElementById('name').value.trim();
+        location.href = 'client.html' + (name ? '?name=' + encodeURIComponent(name) : '');
+    }
+
+    drop.addEventListener('click', function () { fileInput.click(); });
+    drop.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') fileInput.click(); });
+    fileInput.addEventListener('change', function () { if (fileInput.files[0]) load(fileInput.files[0]); });
+    ['dragenter', 'dragover'].forEach(function (t) { drop.addEventListener(t, function (e) { e.preventDefault(); drop.classList.add('over'); }); });
+    ['dragleave', 'drop'].forEach(function (t) { drop.addEventListener(t, function (e) { e.preventDefault(); drop.classList.remove('over'); }); });
+    drop.addEventListener('drop', function (e) { if (e.dataTransfer.files[0]) load(e.dataTransfer.files[0]); });
+    play.addEventListener('click', function () {
+        if (!current) return;
+        play.disabled = true;
+        save(current).then(function () { go(); }).catch(function (e) { err.textContent = 'Could not store place: ' + e; play.disabled = false; });
+    });
+    document.getElementById('base').addEventListener('click', function () {
+        save(null).then(go).catch(go);
+    });
+})();
+</script>
+</body>
+</html>
