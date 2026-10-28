@@ -1,0 +1,18 @@
+const fs = require('fs');
+require('/home/claude/rbx-parser.js');
+const P = globalThis.RBXParser;
+const R = require('/home/claude/rbx-runtime.js');
+const logs = [];
+const game = new R.Game({ out: (k, t) => logs.push(k + ': ' + t) });
+const file = process.argv[2] || '/home/claude/lotsacookie/rblx16/RobloxStudio/content/FirstPlace.rbxl';
+const parsed = P.parse(fs.readFileSync(file));
+const info = game.loadParsed(parsed);
+console.log('loaded', JSON.stringify(info));
+game.start();
+const t0 = Date.now();
+for (let i = 0; i < 300; i++) game.update(1 / 60);
+console.log('300 frames ms', Date.now() - t0);
+console.log(logs.slice(0, 20).join('\n'));
+const ch = game.character();
+console.log('char', ch && ch.props.Name, game.phys.assemblies.size, 'assemblies');
+console.log('hotbar', game.hotbarTools().map(t => t.props.Name));

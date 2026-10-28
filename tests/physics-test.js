@@ -1,0 +1,40 @@
+require('../rbx-physics.js');
+const P = globalThis.RBXPhysics;
+function mk(world, type, pos, shapes, q) {
+  const b = world.createBody({type, position: pos, quaternion: q});
+  shapes.forEach(s => b.addShape(s));
+  world.addBody(b); return b;
+}
+function run(world, secs) { for (let i=0;i<secs*60;i++) world.step(1/60); }
+let w = new P.World();
+mk(w,'static',[0,-10,0],[{type:'box',size:[512,20,512]}]);
+const box = mk(w,'dynamic',[0,10,0],[{type:'box',size:[4,4,4]}]);
+run(w,3); console.log('box rest y', box.origin[1].toFixed(3), 'sleep', box.sleeping);
+w = new P.World();
+mk(w,'static',[0,-10,0],[{type:'box',size:[512,20,512]}]);
+const stack=[0,1,2].map(i=>mk(w,'dynamic',[0,2+i*4.2,0],[{type:'box',size:[4,4,4]}]));
+run(w,4); console.log('stack', stack.map(b=>b.origin.map(v=>v.toFixed(2)).join(',')).join(' | '));
+w = new P.World();
+mk(w,'static',[0,-10,0],[{type:'box',size:[512,20,512]}]);
+const ball=mk(w,'dynamic',[0,10,0],[{type:'sphere',size:[4,4,4]}]);
+run(w,2); console.log('ball y', ball.origin[1].toFixed(3));
+w = new P.World();
+mk(w,'static',[0,-10,0],[{type:'box',size:[512,20,512]}]);
+mk(w,'static',[0,2,0],[{type:'wedge',size:[10,4,10]}]);
+const sb=mk(w,'dynamic',[0,9,2],[{type:'box',size:[2,2,2],friction:0.05}]);
+run(w,2); console.log('slide box', sb.origin.map(v=>v.toFixed(2)).join(','));
+w = new P.World();
+mk(w,'static',[0,-10,0],[{type:'box',size:[512,20,512]}]);
+const asm=mk(w,'dynamic',[0,8,0],[{type:'box',size:[6,1,1],offset:[0,0,0]},{type:'box',size:[1,6,1],offset:[3,3.5,0]}]);
+run(w,3); console.log('assembly', asm.origin.map(v=>v.toFixed(2)).join(','), 'q', asm.quat.map(v=>v.toFixed(2)).join(','), 'sleep', asm.sleeping);
+console.log('ray', (r=>r&&[r.t,r.point,r.normal].join(' '))(w.raycast([0,50,0],[0,-1,0],200)));
+let begins=0; w.onBegin=()=>begins++;
+const falling=mk(w,'dynamic',[30,5,0],[{type:'box',size:[2,2,2]}]); run(w,1); console.log('events', begins);
+w = new P.World();
+const anchor = mk(w,'static',[0,20,0],[{type:'box',size:[1,1,1]}]);
+const arm = mk(w,'dynamic',[4,20,0],[{type:'box',size:[8,1,1]}]);
+w.addJoint({type:'hinge',bodyA:anchor,bodyB:arm,localA:[0,0,0],localB:[-4,0,0],axisA:[0,0,1],axisB:[0,0,1]});
+run(w,2); console.log('hinge arm', arm.origin.map(v=>v.toFixed(2)).join(','));
+const t0=Date.now(); w = new P.World(); mk(w,'static',[0,-10,0],[{type:'box',size:[512,20,512]}]);
+for(let i=0;i<150;i++) mk(w,'dynamic',[(i%10)*5-25,5+Math.floor(i/10)*4.5,(Math.floor(i/10)%3)*2],[{type:'box',size:[4,4,4]}]);
+run(w,5); console.log('150 bodies 5s ms', Date.now()-t0, 'awake', w.stats.awake);
